@@ -1,3 +1,4 @@
+// server.js
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -7,29 +8,77 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow all origins for development
+    origin: "*", // Adjust for your Next.js URL if needed
   },
 });
+
+// Object to store online users: { userId: [socketId, ...] }
+let onlineUsers = {};
+
+// Helper to broadcast the current online users list
+const emitOnlineUsers = () => {
+  io.emit("online_users", Object.keys(onlineUsers));
+};
 
 io.on("connection", (socket) => {
   console.log("✅ User connected:", socket.id);
 
-  // Handle when a user joins a chat room
-  socket.on("join_room", (chatRoomId) => {
-    socket.join(chatRoomId);
-    console.log(`User ${socket.id} joined room ${chatRoomId}`);
+  // When a new socket connects, you could send the current list...
+  // socket.emit("online_users", Object.keys(onlineUsers));
+
+  // Allow a client to request the current list on-demand
+  socket.on("get_online_users", () => {
+    socket.emit("online_users", Object.keys(onlineUsers));
   });
 
-  // Handle sending messages in real time
+  // Mark a user online
+  const markUserOnline = (userId) => {
+    if (!onlineUsers[userId]) {
+      onlineUsers[userId] = [];
+    }
+    if (!onlineUsers[userId].includes(socket.id)) {
+      onlineUsers[userId].push(socket.id);
+    }
+    io.emit("user_online", { userId });
+    emitOnlineUsers();
+    console.log(`User ${userId} is online with sockets:`, onlineUsers[userId]);
+  };
+
+  socket.on("presence_online", ({ userId }) => {
+    markUserOnline(userId);
+  });
+
+  socket.on("join_room", ({ chatRoomId, userId }) => {
+    socket.join(chatRoomId);
+    markUserOnline(userId);
+    console.log(`User ${userId} joined room ${chatRoomId}`);
+  });
+
   socket.on("send_message", (messageData) => {
     console.log("📨 New Message:", messageData);
-
-    // Broadcast message to the same chat room
     io.to(messageData.chatRoomId).emit("receive_message", messageData);
   });
 
+  socket.on("typing", ({ chatRoomId, userId }) => {
+    socket.to(chatRoomId).emit("user_typing", { userId });
+  });
+
+  socket.on("stop_typing", ({ chatRoomId, userId }) => {
+    socket.to(chatRoomId).emit("user_stopped_typing", { userId });
+  });
+
   socket.on("disconnect", () => {
-    console.log("❌ User disconnected:", socket.id);
+    for (const userId in onlineUsers) {
+      onlineUsers[userId] = onlineUsers[userId].filter((id) => id !== socket.id);
+      if (onlineUsers[userId].length === 0) {
+        delete onlineUsers[userId];
+        io.emit("user_offline", { userId });
+        console.log(`User ${userId} is now offline.`);
+      }
+    }
+    emitOnlineUsers();
+    console.log("❌ Socket disconnected:", socket.id);
+    console.log("🟢 Online Users:", onlineUsers);
   });
 });
 
