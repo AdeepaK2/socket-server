@@ -8,7 +8,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: "*", // Adjust for your Next.js URL if needed
+    origin: "*", // Allow all origins
   },
 });
 
@@ -23,7 +23,7 @@ const emitOnlineUsers = () => {
 io.on("connection", (socket) => {
   console.log("✅ User connected:", socket.id);
 
-  // When a new socket connects, you could send the current list...
+ 
   // socket.emit("online_users", Object.keys(onlineUsers));
 
   // Allow a client to request the current list on-demand
