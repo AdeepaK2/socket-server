@@ -67,6 +67,15 @@ io.on("connection", (socket) => {
     socket.to(chatRoomId).emit("user_stopped_typing", { userId });
   });
 
+  socket.on("message_seen", (chatRoomId, userId) => {
+    // Update other clients in the room about the seen status
+    socket.to(chatRoomId).emit("user_see_message", {
+      userId,
+      chatRoomId,
+      timestamp: new Date()
+    });
+  });
+
   socket.on("disconnect", () => {
     for (const userId in onlineUsers) {
       onlineUsers[userId] = onlineUsers[userId].filter((id) => id !== socket.id);
