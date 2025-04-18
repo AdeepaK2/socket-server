@@ -69,7 +69,7 @@ io.on("connection", (socket) => {
 
   socket.on("message_seen", (chatRoomId, userId) => {
     // Update other clients in the room about the seen status
-    socket.to(chatRoomId).emit("user_see_message", {
+    io.in(chatRoomId).emit("user_see_message", {
       userId,
       chatRoomId,
       timestamp: new Date()
