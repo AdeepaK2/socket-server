@@ -1,3 +1,4 @@
+
 // server.js
 const express = require("express");
 const http = require("http");
@@ -65,15 +66,6 @@ io.on("connection", (socket) => {
 
   socket.on("stop_typing", ({ chatRoomId, userId }) => {
     socket.to(chatRoomId).emit("user_stopped_typing", { userId });
-  });
-
-  socket.on("message_seen", ({ chatRoomId, userId }) => {
-    // Update other clients in the room about the seen status
-    socket.to(chatRoomId).emit("user_see_message", {
-      userId,
-      chatRoomId,
-      timestamp: new Date()
-    });
   });
 
   socket.on("disconnect", () => {
