@@ -1,4 +1,3 @@
-
 // server.js
 const express = require("express");
 const http = require("http");
@@ -23,9 +22,6 @@ const emitOnlineUsers = () => {
 
 io.on("connection", (socket) => {
   console.log("✅ User connected:", socket.id);
-
- 
-  // socket.emit("online_users", Object.keys(onlineUsers));
 
   // Allow a client to request the current list on-demand
   socket.on("get_online_users", () => {
@@ -66,6 +62,20 @@ io.on("connection", (socket) => {
 
   socket.on("stop_typing", ({ chatRoomId, userId }) => {
     socket.to(chatRoomId).emit("user_stopped_typing", { userId });
+  });
+
+  socket.on("message_seen", (data) => {
+    const { chatRoomId, userId, messageId } = data;
+    
+    console.log(`🔍 Message seen by ${userId} in room ${chatRoomId}: message ${messageId}`);
+    
+    // Add broadcast to room to ensure all participants are notified immediately
+    io.to(chatRoomId).emit("user_see_message", { 
+      userId, 
+      chatRoomId,
+      messageId,
+      timestamp: Date.now() // Add timestamp for instant updates
+    });
   });
 
   socket.on("disconnect", () => {
