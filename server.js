@@ -69,13 +69,16 @@ io.on("connection", (socket) => {
     
     console.log(`🔍 Message seen by ${userId} in room ${chatRoomId}: message ${messageId}`);
     
-    // Add broadcast to room to ensure all participants are notified immediately
+    // IMPORTANT: Broadcast to ALL clients in the room, including the sender
     io.to(chatRoomId).emit("user_see_message", { 
       userId, 
-      chatRoomId,
       messageId,
+      chatRoomId,
       timestamp: Date.now() // Add timestamp for instant updates
     });
+    
+    // Also store this in the database for persistence
+    // This is where you'd update the message's readBy array in your database
   });
 
   socket.on("disconnect", () => {
