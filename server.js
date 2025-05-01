@@ -64,34 +64,6 @@ io.on("connection", (socket) => {
     socket.to(chatRoomId).emit("user_stopped_typing", { userId });
   });
 
-  socket.on("message_seen", (data) => {
-    const { chatRoomId, userId, messageId } = data;
-    
-    console.log(`🔍 Message seen by ${userId} in room ${chatRoomId}: message ${messageId}`);
-    
-    // IMPORTANT: Broadcast to ALL clients in the room, including the sender
-    io.to(chatRoomId).emit("user_see_message", { 
-      userId, 
-      messageId,
-      chatRoomId,
-      timestamp: Date.now() // Add timestamp for instant updates
-    });
-  });
-
-  socket.on("message_delivered", (data) => {
-    const { chatRoomId, userId, messageId } = data;
-    
-    console.log(`📬 Message delivered to ${userId} in room ${chatRoomId}: message ${messageId}`);
-    
-    // Broadcast to ALL clients in the room
-    io.to(chatRoomId).emit("user_delivered_message", { 
-      userId, 
-      messageId,
-      chatRoomId,
-      timestamp: Date.now()
-    });
-  });
-
   socket.on("disconnect", () => {
     for (const userId in onlineUsers) {
       onlineUsers[userId] = onlineUsers[userId].filter((id) => id !== socket.id);
