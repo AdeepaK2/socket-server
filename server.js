@@ -1,79 +1,162 @@
-// server.js
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 
+// Initialize Express application and HTTP server
 const app = express();
 const server = http.createServer(app);
 
+/**
+ * ! Socket.IO server instance with CORS configuration
+ * @note In production change to respective domain
+ */
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow all origins
+    origin: "*", // TODO: Restrict to specific domains in production
   },
 });
 
-// Object to store online users: { userId: [socketId, ...] }
+/**
+ *! User presence tracking data structure
+ *  @type {Object.<string, Array<string>>}
+ *  @description Maps user IDs to arrays of socket IDs
+ *  This allows a single user to be connected from multiple devices/browsers
+ *  A user is considered online if they have at least one active socket connection
+ */
 let onlineUsers = {};
 
-// Helper to broadcast the current online users list
+/**
+ *! Broadcasts the current list of online users to all connected clients
+ *  @function emitOnlineUsers
+ *  @description Sends only the user IDs (not socket details) for privacy and efficiency
+ */
 const emitOnlineUsers = () => {
   io.emit("online_users", Object.keys(onlineUsers));
 };
 
+//  Socket Connection Handler 
 io.on("connection", (socket) => {
   console.log("✅ User connected:", socket.id);
 
-  // Allow a client to request the current list on-demand
+  /**
+   * Handles requests for the current online users list
+   * @event get_online_users
+   * @description Responds only to the requesting client
+   */
   socket.on("get_online_users", () => {
     socket.emit("online_users", Object.keys(onlineUsers));
   });
 
-  // Mark a user online
+  /**
+   * Registers a user as online with the current socket
+   * @function markUserOnline
+   * @param {string} userId - The unique identifier of the user
+   * @description Updates presence tracking and notifies all clients
+   */
   const markUserOnline = (userId) => {
+    // Initialize user's socket array if this is their first connection
     if (!onlineUsers[userId]) {
       onlineUsers[userId] = [];
     }
+    
+    // Prevent duplicate socket entries for the same user
     if (!onlineUsers[userId].includes(socket.id)) {
       onlineUsers[userId].push(socket.id);
     }
+    
+    // Broadcast presence update to all clients
     io.emit("user_online", { userId });
     emitOnlineUsers();
+    
     console.log(`User ${userId} is online with sockets:`, onlineUsers[userId]);
   };
 
+  /**
+   *! Handles explicit user presence notifications
+   *  @event presence_online
+   *  @description Called when user logs in or explicitly sets their status as online
+   */
   socket.on("presence_online", ({ userId }) => {
     markUserOnline(userId);
   });
 
+  /**
+   *! Handles room join requests and tracks user presence
+   * @event join_room
+   * @description Adds the socket to a specific chat room and updates presence
+   */
   socket.on("join_room", ({ chatRoomId, userId }) => {
     socket.join(chatRoomId);
     markUserOnline(userId);
     console.log(`User ${userId} joined room ${chatRoomId}`);
   });
 
+  /**
+   *! Processes new chat messages
+   * @event send_message
+   * @description Broadcasts the message to all clients in the specified room
+   */
   socket.on("send_message", (messageData) => {
     console.log("📨 New Message:", messageData);
     io.to(messageData.chatRoomId).emit("receive_message", messageData);
   });
 
+  /**
+   *! Handles typing indicator start events
+   *  @event typing
+   *  @description Notifies other room members that a user is typing
+   */
   socket.on("typing", ({ chatRoomId, userId }) => {
     socket.to(chatRoomId).emit("user_typing", { userId });
   });
 
+  /**
+   *! Handles typing indicator stop events
+   * @event stop_typing
+   * @description Notifies other room members that a user stopped typing
+   */
   socket.on("stop_typing", ({ chatRoomId, userId }) => {
     socket.to(chatRoomId).emit("user_stopped_typing", { userId });
   });
 
+  /**
+   *! Processes message read receipts
+   *  @event mark_message_read
+   *  @description Updates and broadcasts when a message has been read
+   */
+  socket.on("mark_message_read", ({ messageId, chatRoomId, readerId }) => {
+    console.log(`Message ${messageId} was read by ${readerId}`);
+    io.to(chatRoomId).emit("message_read", {
+      messageId,
+      chatRoomId,
+      readerId,
+      timestamp: Date.now() // Server timestamp ensures consistency
+    });
+  });
+
+  /**
+   *! Handles socket disconnections
+   *  @event disconnect
+   *  @description Cleans up presence data and notifies other users
+   * A user is only marked offline when all their socket connections are closed
+   */
   socket.on("disconnect", () => {
+    // Scan all users to find and remove this specific socket ID
     for (const userId in onlineUsers) {
+      // Remove this socket from the user's connections array
       onlineUsers[userId] = onlineUsers[userId].filter((id) => id !== socket.id);
+      
+      // If user has no remaining connections, they're fully offline
       if (onlineUsers[userId].length === 0) {
         delete onlineUsers[userId];
         io.emit("user_offline", { userId });
         console.log(`User ${userId} is now offline.`);
       }
     }
+    
+    // Update everyone with the revised online users list
     emitOnlineUsers();
+    
     console.log("❌ Socket disconnected:", socket.id);
     console.log("🟢 Online Users:", onlineUsers);
   });
