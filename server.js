@@ -76,9 +76,20 @@ io.on("connection", (socket) => {
       chatRoomId,
       timestamp: Date.now() // Add timestamp for instant updates
     });
+  });
+
+  socket.on("message_delivered", (data) => {
+    const { chatRoomId, userId, messageId } = data;
     
-    // Also store this in the database for persistence
-    // This is where you'd update the message's readBy array in your database
+    console.log(`📬 Message delivered to ${userId} in room ${chatRoomId}: message ${messageId}`);
+    
+    // Broadcast to ALL clients in the room
+    io.to(chatRoomId).emit("user_delivered_message", { 
+      userId, 
+      messageId,
+      chatRoomId,
+      timestamp: Date.now()
+    });
   });
 
   socket.on("disconnect", () => {
