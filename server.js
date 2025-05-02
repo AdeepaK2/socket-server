@@ -126,14 +126,33 @@ io.on("connection", (socket) => {
    *  @event mark_message_read
    *  @description Updates and broadcasts when a message has been read
    */
-  socket.on("mark_message_read", ({ messageId, chatRoomId, readerId }) => {
-    console.log(`Message ${messageId} was read by ${readerId}`);
+  socket.on("mark_message_read", ({ messageId, chatRoomId, readerId, timestamp }) => {
+    console.log(`⚡ RECEIVED read event: Message ${messageId} was read by ${readerId} in room ${chatRoomId}`);
+    
+    // Log all connected sockets in this room for debugging
+    const roomSockets = io.sockets.adapter.rooms.get(chatRoomId);
+    console.log(`Room ${chatRoomId} has ${roomSockets ? roomSockets.size : 0} connected sockets`);
+    
+    // Broadcast to all clients in the room, including sender for confirmation
     io.to(chatRoomId).emit("message_read", {
       messageId,
       chatRoomId,
       readerId,
-      timestamp: Date.now() // Server timestamp ensures consistency
+      timestamp: timestamp || Date.now()
     });
+    
+    console.log(`✅ Broadcasted read status to room ${chatRoomId}`);
+  });
+
+  /**
+   *! Debug connection handler
+   * @event debug_connection
+   * @description Logs debug information and sends back confirmation
+   */
+  socket.on("debug_connection", (data) => {
+    console.log(`Debug connection from user ${data.userId} in room ${data.chatRoomId}`);
+    // Send back confirmation
+    socket.emit("debug_response", { success: true, timestamp: Date.now() });
   });
 
   /**
