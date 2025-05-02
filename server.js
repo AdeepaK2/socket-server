@@ -116,36 +116,11 @@ io.on("connection", (socket) => {
    * @event stop_typing
    * @description Notifies other room members that a user stopped typing
    */
-  
   socket.on("stop_typing", ({ chatRoomId, userId }) => {
     socket.to(chatRoomId).emit("user_stopped_typing", { userId, chatRoomId });
     console.log(`User ${userId} is stop typing in chat room ${chatRoomId}`);
   });
 
-  /**
-   *! Processes message read receipts
-   *  @event mark_message_read
-   *  @description Updates and broadcasts when a message has been read
-   */
-  socket.on("mark_message_read", ({ messageId, chatRoomId, readerId, timestamp }) => {
-    console.log(`⚡ RECEIVED read event: Message ${messageId} was read by ${readerId} in room ${chatRoomId}`);
-    
-    // Log all connected sockets in this room for debugging
-    const roomSockets = io.sockets.adapter.rooms.get(chatRoomId);
-    console.log(`Room ${chatRoomId} has ${roomSockets ? roomSockets.size : 0} connected sockets`);
-    
-    // Broadcast to all clients in the room, including sender for confirmation
-    io.to(chatRoomId).emit("message_read", {
-      messageId,
-      chatRoomId,
-      readerId,
-      timestamp: timestamp || Date.now()
-    });
-    
-    console.log(`✅ Broadcasted read status to room ${chatRoomId}`);
-  });
-
-  
   /**
    *! Handles socket disconnections
    *  @event disconnect
