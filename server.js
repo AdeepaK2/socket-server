@@ -116,6 +116,7 @@ io.on("connection", (socket) => {
    * @event stop_typing
    * @description Notifies other room members that a user stopped typing
    */
+  
   socket.on("stop_typing", ({ chatRoomId, userId }) => {
     socket.to(chatRoomId).emit("user_stopped_typing", { userId, chatRoomId });
     console.log(`User ${userId} is stop typing in chat room ${chatRoomId}`);
@@ -144,17 +145,7 @@ io.on("connection", (socket) => {
     console.log(`✅ Broadcasted read status to room ${chatRoomId}`);
   });
 
-  /**
-   *! Debug connection handler
-   * @event debug_connection
-   * @description Logs debug information and sends back confirmation
-   */
-  socket.on("debug_connection", (data) => {
-    console.log(`Debug connection from user ${data.userId} in room ${data.chatRoomId}`);
-    // Send back confirmation
-    socket.emit("debug_response", { success: true, timestamp: Date.now() });
-  });
-
+  
   /**
    *! Handles socket disconnections
    *  @event disconnect
