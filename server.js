@@ -107,7 +107,7 @@ io.on("connection", (socket) => {
    *  @description Notifies other room members that a user is typing
    */
   socket.on("typing", ({ chatRoomId, userId }) => {
-    socket.to(chatRoomId).emit("user_typing", { userId });
+    socket.to(chatRoomId).emit("user_typing", { userId, chatRoomId });
     console.log(`User ${userId} is typing in chat room ${chatRoomId}`);
   });
 
@@ -117,7 +117,7 @@ io.on("connection", (socket) => {
    * @description Notifies other room members that a user stopped typing
    */
   socket.on("stop_typing", ({ chatRoomId, userId }) => {
-    socket.to(chatRoomId).emit("user_stopped_typing", { userId });
+    socket.to(chatRoomId).emit("user_stopped_typing", { userId, chatRoomId });
     console.log(`User ${userId} is stop typing in chat room ${chatRoomId}`);
   });
 
