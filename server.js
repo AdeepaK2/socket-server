@@ -101,6 +101,7 @@ io.on("connection", (socket) => {
     io.to(messageData.chatRoomId).emit("receive_message", messageData);
   });
 
+ 
   /**
    *! Handles typing indicator start events
    *  @event typing
@@ -120,6 +121,24 @@ io.on("connection", (socket) => {
     socket.to(chatRoomId).emit("user_stopped_typing", { userId, chatRoomId });
     console.log(`User ${userId} is stop typing in chat room ${chatRoomId}`);
   });
+  /**
+   *! Handles Message Read
+   *  @event message_read
+   *  @description Cleans up presence data and notifies other users
+   * A user is only marked offline when all their socket connections are closed
+   */
+  socket.on("message_read",(data)=>{
+    const {messageId,chatRoomId,readerId,senderId}= data;
+    console.log(` Message ${messageId} is read by ${readerId} in chatroom ${chatRoomId}`);
+
+    io.to(chatRoomId).emit("message_seen",{
+      messageId,
+      readerId,
+      senderId,
+    });
+  });
+
+
 
   /**
    *! Handles socket disconnections
