@@ -6,6 +6,39 @@ const { Server } = require("socket.io");
 const app = express();
 const server = http.createServer(app);
 
+// Add this endpoint to receive notifications from the API
+app.use(express.json());
+
+app.post('/emit-notification', (req, res) => {
+  try {
+    const notificationData = req.body;
+    console.log("📢 API triggered notification:", notificationData);
+    
+    if (notificationData.broadcast) {
+      // Broadcast to all connected clients
+      io.emit("receive_notification", notificationData);
+      console.log("Broadcasting notification to all users");
+    } else if (notificationData.userId) {
+      // Send to specific user's sockets
+      const userSockets = onlineUsers[notificationData.userId];
+      
+      if (userSockets && userSockets.length > 0) {
+        userSockets.forEach(socketId => {
+          io.to(socketId).emit("receive_notification", notificationData);
+        });
+        console.log(`Notification sent to user ${notificationData.userId}`);
+      } else {
+        console.log(`User ${notificationData.userId} is offline, notification saved but not delivered`);
+      }
+    }
+    
+    res.status(200).json({ success: true, message: 'Notification emitted' });
+  } catch (error) {
+    console.error('Error processing notification:', error);
+    res.status(500).json({ success: false, message: 'Error emitting notification' });
+  }
+});
+
 /**
  * ! Socket.IO server instance with CORS configuration
  * @note In production change to respective domain
@@ -72,7 +105,7 @@ io.on("connection", (socket) => {
   };
 
   /**
-   *! Handles explicit user presence notifications
+   *! Handles explicit user presence 
    *  @event presence_online
    *  @description Called when user logs in or explicitly sets their status as online
    */
@@ -138,7 +171,32 @@ io.on("connection", (socket) => {
     });
   });
 
-  
+  /**
+   * Handle notification broadcast or direct user notifications
+   * @event notification
+   * @description Broadcasts notification to specific user(s) or all connected clients
+   */
+  socket.on("notification", (notificationData) => {
+    console.log("📢 New Notification:", notificationData);
+    
+    if (notificationData.broadcast) {
+      // Broadcast to all connected clients
+      io.emit("receive_notification", notificationData);
+      console.log("Broadcasting notification to all users");
+    } else if (notificationData.userId) {
+      // Send to specific user's sockets
+      const userSockets = onlineUsers[notificationData.userId];
+      
+      if (userSockets && userSockets.length > 0) {
+        userSockets.forEach(socketId => {
+          io.to(socketId).emit("receive_notification", notificationData);
+        });
+        console.log(`Notification sent to user ${notificationData.userId}`);
+      } else {
+        console.log(`User ${notificationData.userId} is offline, notification saved but not delivered`);
+      }
+    }
+  });
 
   /**
    *! Handles socket disconnections
