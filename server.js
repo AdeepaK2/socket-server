@@ -2,17 +2,17 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 
-// Initialize Express application and HTTP server
+
 const app = express();
 const server = http.createServer(app);
 
-// Add this endpoint to receive notifications from the API
+// ! norification
 app.use(express.json());
 
 app.post('/emit-notification', (req, res) => {
   try {
     const notificationData = req.body;
-    console.log("📢 API triggered notification:", notificationData);
+    console.log("API triggered notification:", notificationData);
     
     if (notificationData.broadcast) {
       // Broadcast to all connected clients
@@ -45,11 +45,11 @@ app.post('/emit-notification', (req, res) => {
  */
 const io = new Server(server, {
   cors: {
-    origin: "*", // TODO: Restrict to specific domains in production
+    origin: "*", // TODO: Restrict to  domains in production
   },
 });
 
-/**
+/** 
  *! User presence tracking data structure
  *  @type {Object.<string, Array<string>>}
  *  @description Maps user IDs to arrays of socket IDs
@@ -69,7 +69,7 @@ const emitOnlineUsers = () => {
 
 //  Socket Connection Handler 
 io.on("connection", (socket) => {
-  console.log("✅ User connected:", socket.id);
+  console.log("User connected:", socket.id);
 
   /**
    * Handles requests for the current online users list
@@ -177,7 +177,7 @@ io.on("connection", (socket) => {
    * @description Broadcasts notification to specific user(s) or all connected clients
    */
   socket.on("notification", (notificationData) => {
-    console.log("📢 New Notification:", notificationData);
+    console.log("New Notification:", notificationData);
     
     if (notificationData.broadcast) {
       // Broadcast to all connected clients
@@ -195,6 +195,32 @@ io.on("connection", (socket) => {
       } else {
         console.log(`User ${notificationData.userId} is offline, notification saved but not delivered`);
       }
+    }
+  });
+
+  /**
+   *! Handles new meeting creation events
+   * @event meeting_created
+   * @description Notifies the meeting recipient in real-time about a new meeting request
+   */
+  socket.on("meeting_created", ({meetingData, userId}) => {
+    console.log("New meeting created:", meetingData);
+    
+    // Extract receiver ID from meeting data
+    const receiverId = meetingData.receiverId;
+    
+    // Check if recipient is online
+    if (onlineUsers[receiverId] && onlineUsers[receiverId].length > 0) {
+      // Send to all socket connections of the recipient
+      onlineUsers[receiverId].forEach(socketId => {
+        io.to(socketId).emit("new_meeting_request", {
+          meetingData,
+          senderId: userId
+        });
+      });
+      console.log(`Meeting notification sent to user ${receiverId}`);
+    } else {
+      console.log(`User ${receiverId} is offline, meeting notification will be shown when they log in`);
     }
   });
 
@@ -221,8 +247,8 @@ io.on("connection", (socket) => {
     // Update everyone with the revised online users list
     emitOnlineUsers();
     
-    console.log("❌ Socket disconnected:", socket.id);
-    console.log("🟢 Online Users:", onlineUsers);
+    console.log("Socket disconnected:", socket.id);
+    console.log("Online Users:", onlineUsers);
   });
 });
 
