@@ -202,8 +202,7 @@ io.on("connection", (socket) => {
   /**
    *! Handles socket disconnections
    *  @event disconnect
-   *  @description Cleans up presence data and notifies other users
-   * A user is only marked offline when all their socket connections are closed
+   *  @description 
    */
   socket.on("disconnect", () => {
     // Scan all users to find and remove this specific socket ID
