@@ -198,32 +198,7 @@ io.on("connection", (socket) => {
     }
   });
 
-  /**
-   *! Handles new meeting creation events
-   * @event meeting_created
-   * @description Notifies the meeting recipient in real-time about a new meeting request
-   */
-  socket.on("meeting_created", ({meetingData, userId}) => {
-    console.log("New meeting created:", meetingData);
-    
-    // Extract receiver ID from meeting data
-    const receiverId = meetingData.receiverId;
-    
-    // Check if recipient is online
-    if (onlineUsers[receiverId] && onlineUsers[receiverId].length > 0) {
-      // Send to all socket connections of the recipient
-      onlineUsers[receiverId].forEach(socketId => {
-        io.to(socketId).emit("new_meeting_request", {
-          meetingData,
-          senderId: userId
-        });
-      });
-      console.log(`Meeting notification sent to user ${receiverId}`);
-    } else {
-      console.log(`User ${receiverId} is offline, meeting notification will be shown when they log in`);
-    }
-  });
-
+ 
   /**
    *! Handles socket disconnections
    *  @event disconnect
