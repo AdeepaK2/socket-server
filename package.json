@@ -19,6 +19,7 @@
   "homepage": "https://github.com/Code102SoftwareProject/socket-server#readme",
   "dependencies": {
     "express": "^4.21.2",
+    "redis": "^5.5.6",
     "socket-io": "^1.0.0",
     "socket.io": "^4.8.1"
   }
