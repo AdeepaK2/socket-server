@@ -1,3 +1,5 @@
+require('dotenv').config();
+
 const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
@@ -6,7 +8,7 @@ const { createClient } = require('redis');
 const app = express();
 const server = http.createServer(app);
 
-// Redis client setup
+// Redis client setup - Cloud Configuration
 const redis = createClient({
   url: process.env.REDIS_URL || 'redis://localhost:6379'
 });
@@ -317,14 +319,14 @@ io.on("connection", (socket) => {
     socket.to(chatRoomId).emit("user_typing", { userId, chatRoomId });
     console.log(`User ${userId} is typing in chat room ${chatRoomId}`);
   });
-
   /**
    *! Handles typing indicator stop events
    * @event stop_typing
    * @description Notifies other room members that a user stopped typing
-   */  socket.on("stop_typing", ({ chatRoomId, userId }) => {
+   */
+  socket.on("stop_typing", ({ chatRoomId, userId }) => {
     socket.to(chatRoomId).emit("user_stopped_typing", { userId, chatRoomId });
-    console.log(`User ${userId} is stop typing in chat room ${chatRoomId}`);
+    console.log(`User ${userId} stopped typing in chat room ${chatRoomId}`);
   });
 
   /**
@@ -449,6 +451,8 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(3001, () => {
-  console.log("🚀 Socket server running on port 3001");
+const PORT = process.env.PORT || 3001;
+
+server.listen(PORT, () => {
+  console.log(`🚀 Socket server running on port ${PORT}`);
 });
