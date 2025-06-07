@@ -387,9 +387,55 @@ io.on("connection", (socket) => {
         deliveryStatus: MessageDeliveryStatus.READ,
         chatRoomId,
         readAt: Date.now()
-      });
-    } catch (error) {
+      });    } catch (error) {
       console.error('Error tracking message read status:', error);
+    }
+  });
+
+  /**
+   * @event check_delivery_status
+   * @description Check and update delivery status for pending messages
+   */
+  socket.on("check_delivery_status", async (data) => {
+    const { messageId, chatRoomId, senderId } = data;
+    console.log(`Checking delivery status for message ${messageId}`);
+
+    try {
+      // Get current delivery status from Redis
+      const deliveryKey = REDIS_KEYS.MESSAGE_DELIVERY(messageId);
+      const currentStatus = await redis.hGet(deliveryKey, 'status');
+      
+      if (currentStatus === MessageDeliveryStatus.SENT) {
+        // Check if recipient is online (this would require knowing the recipient)
+        // For now, we'll mark as delivered if someone is checking
+        await trackMessageDelivery(messageId, senderId, MessageDeliveryStatus.DELIVERED);
+        
+        // Emit delivery update to the chat room
+        io.to(chatRoomId).emit("message_delivery_update", {
+          messageId,
+          deliveryStatus: MessageDeliveryStatus.DELIVERED,
+          chatRoomId,
+          deliveredAt: Date.now()
+        });
+      }
+    } catch (error) {
+      console.error('Error checking delivery status:', error);
+    }
+  });
+
+  /**
+   * @event user_came_online
+   * @description Handle when a user comes online and update delivery status of their pending messages
+   */
+  socket.on("user_came_online", async (data) => {
+    const { userId } = data;
+    console.log(`User ${userId} came online, processing pending messages`);
+
+    try {
+      // Process undelivered messages for this user
+      await processUndeliveredMessages(userId);
+    } catch (error) {
+      console.error('Error processing user came online:', error);
     }
   });
 
