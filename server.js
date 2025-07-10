@@ -399,12 +399,48 @@ io.on("connection", (socket) => {
   });
 
   /**
-   *! Leave meeting chat
-   * @event leave_meeting_chat
-   * @description Leaves a meeting-specific chat room
+   *! Join meeting room for video/audio connection
+   * @event join_meeting_room
+   * @description Joins the main meeting room for video/audio coordination
    */
-  socket.on("leave_meeting_chat", async ({ meetingId, userId }) => {
-    const meetingRoom = `meeting_chat_${meetingId}`;
+  socket.on("join_meeting_room", async ({ meetingId, userId, userInfo }) => {
+    const meetingRoom = `meeting_${meetingId}`;
+    socket.join(meetingRoom);
+    
+    // Track meeting participant
+    await addMeetingParticipant(meetingId, userId, socket.id);
+    
+    // Initialize meeting room tracking
+    if (!meetingRooms[meetingId]) {
+      meetingRooms[meetingId] = new Set();
+    }
+    meetingRooms[meetingId].add(socket.id);
+    
+    console.log(`User ${userId} joined meeting room ${meetingId}`);
+    
+    // Notify other participants about user joining
+    socket.to(meetingRoom).emit('user_joined_meeting', {
+      userId,
+      userInfo,
+      socketId: socket.id,
+      timestamp: Date.now()
+    });
+    
+    // Send current participants list to the new user
+    const participants = await getMeetingParticipants(meetingId);
+    socket.emit('meeting_participants_list', {
+      meetingId,
+      participants: participants.filter(p => p.userId !== userId)
+    });
+  });
+
+  /**
+   *! Leave meeting room
+   * @event leave_meeting_room
+   * @description Leaves the main meeting room
+   */
+  socket.on("leave_meeting_room", async ({ meetingId, userId }) => {
+    const meetingRoom = `meeting_${meetingId}`;
     socket.leave(meetingRoom);
     
     // Remove from meeting participant tracking
@@ -418,21 +454,73 @@ io.on("connection", (socket) => {
       }
     }
     
-    console.log(`User ${userId} left meeting chat ${meetingId}`);
+    console.log(`User ${userId} left meeting room ${meetingId}`);
     
-    // Send system message to remaining participants
-    const systemMessage = {
-      id: Date.now().toString(),
-      senderId: 'system',
-      senderName: 'System',
-      message: `User left the meeting`,
-      timestamp: new Date(),
-      type: 'system'
-    };
-    
-    socket.to(meetingRoom).emit('meeting_system_message', {
+    // Notify other participants about user leaving
+    socket.to(meetingRoom).emit('user_left_meeting', {
+      userId,
+      timestamp: Date.now()
+    });
+  });
+
+  /**
+   *! WebRTC signaling for peer-to-peer connection
+   * @event webrtc_offer
+   * @description Sends WebRTC offer to specific user
+   */
+  socket.on("webrtc_offer", ({ meetingId, targetUserId, offer, offerUserId }) => {
+    const meetingRoom = `meeting_${meetingId}`;
+    // Send offer to specific user in the meeting
+    socket.to(meetingRoom).emit('webrtc_offer_received', {
       meetingId,
-      message: systemMessage
+      offer,
+      offerUserId,
+      targetUserId
+    });
+  });
+
+  /**
+   *! WebRTC answer
+   * @event webrtc_answer
+   * @description Sends WebRTC answer to specific user
+   */
+  socket.on("webrtc_answer", ({ meetingId, targetUserId, answer, answerUserId }) => {
+    const meetingRoom = `meeting_${meetingId}`;
+    socket.to(meetingRoom).emit('webrtc_answer_received', {
+      meetingId,
+      answer,
+      answerUserId,
+      targetUserId
+    });
+  });
+
+  /**
+   *! WebRTC ICE candidate
+   * @event webrtc_ice_candidate
+   * @description Sends ICE candidate to specific user
+   */
+  socket.on("webrtc_ice_candidate", ({ meetingId, targetUserId, candidate, candidateUserId }) => {
+    const meetingRoom = `meeting_${meetingId}`;
+    socket.to(meetingRoom).emit('webrtc_ice_candidate_received', {
+      meetingId,
+      candidate,
+      candidateUserId,
+      targetUserId
+    });
+  });
+
+  /**
+   *! Media state changes (mute/unmute, video on/off)
+   * @event media_state_change
+   * @description Broadcasts media state changes to other participants
+   */
+  socket.on("media_state_change", ({ meetingId, userId, mediaState }) => {
+    const meetingRoom = `meeting_${meetingId}`;
+    socket.to(meetingRoom).emit('participant_media_state_changed', {
+      meetingId,
+      userId,
+      mediaState,
+      timestamp: Date.now()
     });
   });
 
@@ -758,6 +846,8 @@ io.on("connection", (socket) => {
    *  @description Updates presence tracking and Redis when user disconnects
    */
   socket.on("disconnect", async () => {
+    let disconnectedUserId = null;
+    
     // Scan all users to find and remove this specific socket ID
     for (const userId in onlineUsers) {
       // Remove this socket from the user's connections array
@@ -765,6 +855,7 @@ io.on("connection", (socket) => {
       
       // If user has no remaining connections, they're fully offline
       if (onlineUsers[userId].length === 0) {
+        disconnectedUserId = userId;
         delete onlineUsers[userId];
         
         // Update Redis with offline status
@@ -775,11 +866,26 @@ io.on("connection", (socket) => {
       }
     }
     
-    // Clean up meeting room tracking
+    // Clean up meeting room tracking and notify participants
     for (const meetingId in meetingRooms) {
-      meetingRooms[meetingId].delete(socket.id);
-      if (meetingRooms[meetingId].size === 0) {
-        delete meetingRooms[meetingId];
+      if (meetingRooms[meetingId].has(socket.id)) {
+        meetingRooms[meetingId].delete(socket.id);
+        
+        // Remove from Redis tracking
+        if (disconnectedUserId) {
+          await removeMeetingParticipant(meetingId, disconnectedUserId);
+          
+          // Notify other participants
+          socket.to(`meeting_${meetingId}`).emit('user_left_meeting', {
+            userId: disconnectedUserId,
+            timestamp: Date.now()
+          });
+        }
+        
+        // Clean up empty meeting rooms
+        if (meetingRooms[meetingId].size === 0) {
+          delete meetingRooms[meetingId];
+        }
       }
     }
     
@@ -787,6 +893,9 @@ io.on("connection", (socket) => {
     emitOnlineUsers();
     
     console.log("Socket disconnected:", socket.id);
+    if (disconnectedUserId) {
+      console.log("User disconnected from meetings:", disconnectedUserId);
+    }
     console.log("Online Users:", onlineUsers);
   });
 });
