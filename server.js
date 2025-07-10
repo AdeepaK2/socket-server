@@ -37,6 +37,9 @@ const REDIS_KEYS = {
   USER_LAST_SEEN: (userId) => `user_last_seen:${userId}`,
   UNDELIVERED_MESSAGES: (userId) => `undelivered:${userId}`,
   READ_RECEIPTS: (messageId) => `read_receipts:${messageId}`,
+  MEETING_PARTICIPANTS: (meetingId) => `meeting_participants:${meetingId}`,
+  MEETING_TRANSCRIPTS: (meetingId) => `meeting_transcripts:${meetingId}`,
+  MEETING_CHAT: (meetingId) => `meeting_chat:${meetingId}`,
 };
 
 // Message delivery status helper functions
@@ -59,8 +62,36 @@ const trackMessageDelivery = async (messageId, recipientId, status, timestamp = 
 
     await redis.hSet(deliveryKey, deliveryData);
     await redis.expire(deliveryKey, 30 * 24 * 60 * 60); // 30 days expiry
+    
+    // Also update database for persistence
+    await updateDeliveryStatusInDatabase(messageId, status);
   } catch (error) {
     console.error('Error tracking message delivery:', error);
+  }
+};
+
+// Function to update delivery status in MongoDB database
+const updateDeliveryStatusInDatabase = async (messageId, deliveryStatus) => {
+  try {
+    const response = await fetch('http://localhost:3001/api/messages/delivery-status', {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-system-api-key': process.env.SYSTEM_API_KEY || 'XhgL7Pkz5vBYtRQj2DAm9cEq3UF8TnW4ZsV6HdxfKCNr1pGya0JuLiMo4eS5wbP2'
+      },
+      body: JSON.stringify({
+        messageId,
+        deliveryStatus
+      })
+    });
+
+    if (response.ok) {
+      console.log(`Database updated: Message ${messageId} status -> ${deliveryStatus}`);
+    } else {
+      console.error('Failed to update database delivery status:', await response.text());
+    }
+  } catch (error) {
+    console.error('Error updating database delivery status:', error);
   }
 };
 
@@ -142,7 +173,65 @@ const processUndeliveredMessages = async (userId) => {
   }
 };
 
-// ! norification
+// Meeting-specific helper functions
+const addMeetingParticipant = async (meetingId, userId, socketId) => {
+  try {
+    const participantKey = REDIS_KEYS.MEETING_PARTICIPANTS(meetingId);
+    await redis.hSet(participantKey, userId, JSON.stringify({
+      socketId,
+      joinedAt: Date.now(),
+      status: 'active'
+    }));
+    await redis.expire(participantKey, 24 * 60 * 60); // 24 hours expiry
+  } catch (error) {
+    console.error('Error adding meeting participant:', error);
+  }
+};
+
+const removeMeetingParticipant = async (meetingId, userId) => {
+  try {
+    const participantKey = REDIS_KEYS.MEETING_PARTICIPANTS(meetingId);
+    await redis.hDel(participantKey, userId);
+  } catch (error) {
+    console.error('Error removing meeting participant:', error);
+  }
+};
+
+const getMeetingParticipants = async (meetingId) => {
+  try {
+    const participantKey = REDIS_KEYS.MEETING_PARTICIPANTS(meetingId);
+    const participants = await redis.hGetAll(participantKey);
+    return Object.keys(participants).map(userId => ({
+      userId,
+      ...JSON.parse(participants[userId])
+    }));
+  } catch (error) {
+    console.error('Error getting meeting participants:', error);
+    return [];
+  }
+};
+
+const saveMeetingTranscriptSegment = async (meetingId, segment) => {
+  try {
+    const transcriptKey = REDIS_KEYS.MEETING_TRANSCRIPTS(meetingId);
+    await redis.lPush(transcriptKey, JSON.stringify(segment));
+    await redis.expire(transcriptKey, 7 * 24 * 60 * 60); // 7 days expiry
+  } catch (error) {
+    console.error('Error saving transcript segment:', error);
+  }
+};
+
+const saveMeetingChatMessage = async (meetingId, message) => {
+  try {
+    const chatKey = REDIS_KEYS.MEETING_CHAT(meetingId);
+    await redis.lPush(chatKey, JSON.stringify(message));
+    await redis.expire(chatKey, 7 * 24 * 60 * 60); // 7 days expiry
+  } catch (error) {
+    console.error('Error saving meeting chat message:', error);
+  }
+};
+
+// ! notification
 app.use(express.json());
 
 app.post('/emit-notification', (req, res) => {
@@ -195,6 +284,13 @@ const io = new Server(server, {
 let onlineUsers = {};
 
 /**
+ *! Meeting rooms tracking
+ * @type {Object.<string, Set<string>>}
+ * @description Maps meeting IDs to sets of socket IDs
+ */
+let meetingRooms = {};
+
+/**
  *! Broadcasts the current list of online users to all connected clients
  *  @function emitOnlineUsers
  *  @description Sends only the user IDs (not socket details) for privacy and efficiency
@@ -215,6 +311,7 @@ io.on("connection", (socket) => {
   socket.on("get_online_users", () => {
     socket.emit("online_users", Object.keys(onlineUsers));
   });
+
   /**
    * Registers a user as online with the current socket
    * @function markUserOnline
@@ -264,6 +361,192 @@ io.on("connection", (socket) => {
     markUserOnline(userId);
     console.log(`User ${userId} joined room ${chatRoomId}`);
   });
+
+  /**
+   *! Meeting-specific room joining
+   * @event join_meeting_chat
+   * @description Joins a meeting-specific chat room
+   */
+  socket.on("join_meeting_chat", async ({ meetingId, userId }) => {
+    const meetingRoom = `meeting_chat_${meetingId}`;
+    socket.join(meetingRoom);
+    
+    // Track meeting participant
+    await addMeetingParticipant(meetingId, userId, socket.id);
+    
+    // Initialize meeting room tracking
+    if (!meetingRooms[meetingId]) {
+      meetingRooms[meetingId] = new Set();
+    }
+    meetingRooms[meetingId].add(socket.id);
+    
+    console.log(`User ${userId} joined meeting chat ${meetingId}`);
+    
+    // Send system message to meeting participants
+    const systemMessage = {
+      id: Date.now().toString(),
+      senderId: 'system',
+      senderName: 'System',
+      message: `User joined the meeting`,
+      timestamp: new Date(),
+      type: 'system'
+    };
+    
+    socket.to(meetingRoom).emit('meeting_system_message', {
+      meetingId,
+      message: systemMessage
+    });
+  });
+
+  /**
+   *! Leave meeting chat
+   * @event leave_meeting_chat
+   * @description Leaves a meeting-specific chat room
+   */
+  socket.on("leave_meeting_chat", async ({ meetingId, userId }) => {
+    const meetingRoom = `meeting_chat_${meetingId}`;
+    socket.leave(meetingRoom);
+    
+    // Remove from meeting participant tracking
+    await removeMeetingParticipant(meetingId, userId);
+    
+    // Remove from meeting room tracking
+    if (meetingRooms[meetingId]) {
+      meetingRooms[meetingId].delete(socket.id);
+      if (meetingRooms[meetingId].size === 0) {
+        delete meetingRooms[meetingId];
+      }
+    }
+    
+    console.log(`User ${userId} left meeting chat ${meetingId}`);
+    
+    // Send system message to remaining participants
+    const systemMessage = {
+      id: Date.now().toString(),
+      senderId: 'system',
+      senderName: 'System',
+      message: `User left the meeting`,
+      timestamp: new Date(),
+      type: 'system'
+    };
+    
+    socket.to(meetingRoom).emit('meeting_system_message', {
+      meetingId,
+      message: systemMessage
+    });
+  });
+
+  /**
+   *! Handle meeting chat messages
+   * @event meeting_chat_message
+   * @description Broadcasts chat message to meeting participants
+   */
+  socket.on("meeting_chat_message", async (data) => {
+    const { meetingId, message } = data;
+    const meetingRoom = `meeting_chat_${meetingId}`;
+    
+    console.log(`Meeting chat message in ${meetingId}:`, message);
+    
+    // Save message to Redis for persistence
+    await saveMeetingChatMessage(meetingId, message);
+    
+    // Broadcast to all meeting participants
+    socket.to(meetingRoom).emit('meeting_chat_message', {
+      meetingId,
+      message
+    });
+  });
+
+  /**
+   *! Handle meeting transcription segments
+   * @event meeting_transcription_segment
+   * @description Broadcasts transcription segment to meeting participants
+   */
+  socket.on("meeting_transcription_segment", async (data) => {
+    const { meetingId, segment } = data;
+    const meetingRoom = `meeting_transcription_${meetingId}`;
+    
+    console.log(`Transcription segment in meeting ${meetingId}:`, segment);
+    
+    // Save transcript segment to Redis
+    await saveMeetingTranscriptSegment(meetingId, segment);
+    
+    // Broadcast to all meeting participants
+    socket.to(meetingRoom).emit('meeting_transcription_segment', {
+      meetingId,
+      segment
+    });
+    
+    // Also save to database for long-term storage
+    try {
+      await fetch('http://localhost:3001/api/meeting/transcription', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-system-api-key': process.env.SYSTEM_API_KEY || 'XhgL7Pkz5vBYtRQj2DAm9cEq3UF8TnW4ZsV6HdxfKCNr1pGya0JuLiMo4eS5wbP2'
+        },
+        body: JSON.stringify({
+          meetingId,
+          segments: [segment],
+          timestamp: Date.now()
+        })
+      });
+    } catch (error) {
+      console.error('Error saving transcription to database:', error);
+    }
+  });
+
+  /**
+   *! Join meeting transcription room
+   * @event join_meeting_transcription
+   * @description Joins meeting transcription room for real-time updates
+   */
+  socket.on("join_meeting_transcription", ({ meetingId, userId }) => {
+    const transcriptionRoom = `meeting_transcription_${meetingId}`;
+    socket.join(transcriptionRoom);
+    console.log(`User ${userId} joined meeting transcription ${meetingId}`);
+  });
+
+  /**
+   *! Handle meeting status updates
+   * @event meeting_status_update
+   * @description Broadcasts meeting status changes (started, ended, etc.)
+   */
+  socket.on("meeting_status_update", async (data) => {
+    const { meetingId, status, userId } = data;
+    const meetingRoom = `meeting_${meetingId}`;
+    
+    console.log(`Meeting ${meetingId} status update: ${status} by user ${userId}`);
+    
+    // Broadcast status update to all meeting participants
+    io.to(meetingRoom).emit('meeting_status_update', {
+      meetingId,
+      status,
+      updatedBy: userId,
+      timestamp: Date.now()
+    });
+  });
+
+  /**
+   *! Handle meeting recording controls
+   * @event meeting_recording_control
+   * @description Broadcasts recording start/stop events
+   */
+  socket.on("meeting_recording_control", async (data) => {
+    const { meetingId, action, userId } = data; // action: 'start' or 'stop'
+    const meetingRoom = `meeting_${meetingId}`;
+    
+    console.log(`Meeting ${meetingId} recording ${action} by user ${userId}`);
+    
+    // Broadcast recording status to all meeting participants
+    socket.to(meetingRoom).emit('meeting_recording_status', {
+      meetingId,
+      isRecording: action === 'start',
+      updatedBy: userId,
+      timestamp: Date.now()
+    });
+  });
+
   /**
    *! Processes new chat messages
    * @event send_message
@@ -309,7 +592,6 @@ io.on("connection", (socket) => {
     }
   });
 
- 
   /**
    *! Handles typing indicator start events
    *  @event typing
@@ -319,6 +601,7 @@ io.on("connection", (socket) => {
     socket.to(chatRoomId).emit("user_typing", { userId, chatRoomId });
     console.log(`User ${userId} is typing in chat room ${chatRoomId}`);
   });
+
   /**
    *! Handles typing indicator stop events
    * @event stop_typing
@@ -368,7 +651,9 @@ io.on("connection", (socket) => {
     try {
       // Track read status in Redis
       await trackMessageDelivery(messageId, readerId, MessageDeliveryStatus.READ);
-      await redis.sAdd(REDIS_KEYS.READ_RECEIPTS(messageId), readerId);      // Notify sender about read status
+      await redis.sAdd(REDIS_KEYS.READ_RECEIPTS(messageId), readerId);
+
+      // Notify sender about read status
       const senderSockets = onlineUsers[senderId];
       if (senderSockets) {
         senderSockets.forEach(socketId => {
@@ -387,7 +672,8 @@ io.on("connection", (socket) => {
         deliveryStatus: MessageDeliveryStatus.READ,
         chatRoomId,
         readAt: Date.now()
-      });    } catch (error) {
+      });
+    } catch (error) {
       console.error('Error tracking message read status:', error);
     }
   });
@@ -466,7 +752,7 @@ io.on("connection", (socket) => {
     }
   });
 
-   /**
+  /**
    *! Handles socket disconnections
    *  @event disconnect
    *  @description Updates presence tracking and Redis when user disconnects
@@ -489,6 +775,14 @@ io.on("connection", (socket) => {
       }
     }
     
+    // Clean up meeting room tracking
+    for (const meetingId in meetingRooms) {
+      meetingRooms[meetingId].delete(socket.id);
+      if (meetingRooms[meetingId].size === 0) {
+        delete meetingRooms[meetingId];
+      }
+    }
+    
     // Update everyone with the revised online users list
     emitOnlineUsers();
     
@@ -501,4 +795,7 @@ const PORT = process.env.PORT || 3001;
 
 server.listen(PORT, () => {
   console.log(`🚀 Socket server running on port ${PORT}`);
+  console.log(`📱 Meeting features enabled`);
+  console.log(`🎙️ Real-time transcription supported`);
+  console.log(`💬 Meeting chat supported`);
 });
