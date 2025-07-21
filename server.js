@@ -2,44 +2,14 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 
-// API Key for authentication
-const API_KEY = process.env.SYSTEM_API_KEY;
 
 const app = express();
 const server = http.createServer(app);
 
-// ! notification
+// ! norification
 app.use(express.json());
 
-// Health check endpoint 
-app.get('/health', (req, res) => {
-  res.status(200).json({ 
-    status: 'healthy', 
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
-
-// Middleware to validate API key for HTTP
-const validateApiKey = (req, res, next) => {
-  const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
-  
-  if (!apiKey || apiKey !== API_KEY) {
-    console.log('🚨 Unauthorized access attempt:', {
-      ip: req.ip,
-      userAgent: req.get('User-Agent'),
-      timestamp: new Date().toISOString()
-    });
-    return res.status(401).json({ 
-      success: false, 
-      message: 'Unauthorized: Invalid or missing API key' 
-    });
-  }
-  
-  next();
-};
-
-app.post('/emit-notification', validateApiKey, (req, res) => {
+app.post('/emit-notification', (req, res) => {
   try {
     const notificationData = req.body;
     console.log("API triggered notification:", notificationData);
@@ -70,23 +40,13 @@ app.post('/emit-notification', validateApiKey, (req, res) => {
 });
 
 /**
- * ! Socket.IO server instance with CORS configuration and authentication
+ * ! Socket.IO server instance with CORS configuration
  * @note In production change to respective domain
  */
 const io = new Server(server, {
   cors: {
-    origin: "https://code102.site/", // TODO: Restrict to  domains in production- code102.site
+    origin: "*", // TODO: Restrict to  domains in production
   },
-  // Authentication middleware for Socket.IO connections
-  auth: (auth, callback) => {
-    const token = auth.token || auth.apiKey;
-    
-    if (!token || token !== API_KEY) {
-      return callback(new Error("Authentication failed: Invalid API key"));
-    }
-    
-    callback(null, true);
-  }
 });
 
 /** 
@@ -109,15 +69,7 @@ const emitOnlineUsers = () => {
 
 //  Socket Connection Handler 
 io.on("connection", (socket) => {
-  console.log("✅ Authenticated user connected:", socket.id);
-
-  // Log connection details for security monitoring
-  console.log("Connection details:", {
-    socketId: socket.id,
-    remoteAddress: socket.handshake.address,
-    userAgent: socket.handshake.headers['user-agent'],
-    timestamp: new Date().toISOString()
-  });
+  console.log("User connected:", socket.id);
 
   /**
    * Handles requests for the current online users list
